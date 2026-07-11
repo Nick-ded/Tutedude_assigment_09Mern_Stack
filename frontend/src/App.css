@@ -1,0 +1,32 @@
+/* App-level layout */
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-container > main {
+  flex: 1;
+}
+
+/* Login page — remove header padding since it uses full viewport */
+body:has(.login-fullscreen) .app-header {
+  display: none;
+}
+
+/* Responsive scanner grid */
+@media (max-width: 900px) {
+  #security-scan-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .login-split {
+    grid-template-columns: 1fr !important;
+  }
+
+  .login-split > div:first-child {
+    display: none !important;
+  }
+}
