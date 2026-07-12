@@ -2,7 +2,7 @@ import Appointment from '../models/Appointment.js';
 import Pass from '../models/Pass.js';
 import Visitor from '../models/Visitor.js';
 import crypto from 'crypto';
-import { sendAppointmentRequestEmail, sendPassEmail } from '../utils/sendEmail.js';
+import { sendAppointmentRequestEmail, sendApprovalEmail, sendRejectionEmail } from '../utils/sendEmail.js'
 
 // @desc    Create appointment (logged-in host)
 // @route   POST /api/appointments
@@ -137,15 +137,14 @@ export const approveAppointment = async (req, res) => {
     });
 
     // Email QR pass to visitor (non-blocking)
-    sendPassEmail({
+    sendApprovalEmail({
       visitorEmail:  appointment.visitor.email,
       visitorName:   appointment.visitor.name,
       hostName:      appointment.host.name,
       purpose:       appointment.purpose,
       scheduledDate: appointment.expectedDate,
       qrCodeData,
-      passId:        pass._id,
-    });
+    })
 
     res.json({ appointment, pass });
   } catch (error) {
@@ -169,10 +168,22 @@ export const rejectAppointment = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to reject this appointment' });
     }
 
-    appointment.status = 'Rejected';
-    await appointment.save();
+    appointment.status = 'Rejected'
+    await appointment.save()
 
-    res.json({ message: 'Appointment rejected', appointment });
+    // load visitor and host for the email
+    const fullApt = await Appointment.findById(appointment._id)
+      .populate('visitor', 'name email')
+      .populate('host', 'name')
+
+    sendRejectionEmail({
+      visitorEmail: fullApt.visitor.email,
+      visitorName:  fullApt.visitor.name,
+      hostName:     fullApt.host.name,
+      purpose:      fullApt.purpose,
+    })
+
+    res.json({ message: 'Appointment rejected', appointment })
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });

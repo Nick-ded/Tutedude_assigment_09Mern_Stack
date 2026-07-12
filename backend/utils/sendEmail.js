@@ -1,122 +1,168 @@
-import nodemailer from 'nodemailer';
+// sendEmail.js - handles all email notifications
+// uses gmail via nodemailer with app password
 
-// Creates a transporter — uses Ethereal (fake SMTP) in dev if no real creds provided.
-// In production set EMAIL_USER and EMAIL_PASS in .env
-const createTransporter = async () => {
+import nodemailer from 'nodemailer'
+
+// log whether real email is configured on startup
+console.log('Email config:', process.env.EMAIL_USER ? `Real Gmail (${process.env.EMAIL_USER})` : 'Ethereal test mode')
+
+function createTransporter() {
   if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-    // Real SMTP (Gmail, Outlook, etc.)
+    // real gmail
     return nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE || 'gmail',
+      service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
-    });
+    })
   }
-
-  // Dev fallback: Ethereal fake SMTP — emails are captured at https://ethereal.email
-  const testAccount = await nodemailer.createTestAccount();
-  const transporter = nodemailer.createTransport({
+  // fallback - won't actually deliver but won't crash either
+  return nodemailer.createTransport({
     host: 'smtp.ethereal.email',
     port: 587,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
-    },
-  });
-  console.log('📧 Ethereal test email account:', testAccount.user);
-  return transporter;
-};
+    auth: { user: 'fake@ethereal.email', pass: 'fakepass' },
+  })
+}
 
-/**
- * Send appointment request notification to host
- */
-export const sendAppointmentRequestEmail = async ({ hostEmail, hostName, visitorName, purpose, scheduledDate }) => {
+const FROM = () => `"PassGuard" <${process.env.EMAIL_USER || 'noreply@passguard.io'}>`
+
+// send email to host when a visitor submits pre-registration
+export async function sendAppointmentRequestEmail({ hostEmail, hostName, visitorName, purpose, scheduledDate }) {
   try {
-    const transporter = await createTransporter();
+    const transporter = createTransporter()
     const dateStr = new Date(scheduledDate).toLocaleString('en-US', {
       weekday: 'long', year: 'numeric', month: 'long',
       day: 'numeric', hour: '2-digit', minute: '2-digit',
-    });
+    })
 
     const info = await transporter.sendMail({
-      from: `"PassGuard" <${process.env.EMAIL_USER || 'noreply@passguard.io'}>`,
+      from: FROM(),
       to: hostEmail,
-      subject: `New Visit Request from ${visitorName}`,
+      subject: `New Visit Request from ${visitorName} — Action Required`,
       html: `
-        <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;background:#0f172a;color:#f1f5f9;border-radius:12px;overflow:hidden;">
-          <div style="background:linear-gradient(135deg,#6366f1,#06b6d4);padding:2rem;text-align:center;">
-            <h1 style="margin:0;font-size:1.5rem;color:white;">🛡️ PassGuard</h1>
-            <p style="margin:0.5rem 0 0;color:rgba(255,255,255,0.8);font-size:0.9rem;">Visitor Pass Management</p>
+        <div style="font-family:Inter,Arial,sans-serif;max-width:580px;margin:0 auto;background:#0f172a;color:#f1f5f9;border-radius:12px;overflow:hidden;border:1px solid #1e293b;">
+          <div style="background:linear-gradient(135deg,#6366f1,#06b6d4);padding:1.75rem 2rem;">
+            <h1 style="margin:0;font-size:1.4rem;color:white;font-weight:800;">🛡️ PassGuard</h1>
+            <p style="margin:0.4rem 0 0;color:rgba(255,255,255,0.75);font-size:0.875rem;">Visitor Management System</p>
           </div>
           <div style="padding:2rem;">
-            <h2 style="color:#818cf8;margin-top:0;">New Visit Request</h2>
-            <p>Hi <strong>${hostName}</strong>,</p>
-            <p>You have a new visit request awaiting your approval:</p>
-            <table style="width:100%;border-collapse:collapse;margin:1.5rem 0;">
-              <tr><td style="padding:0.75rem;border-bottom:1px solid #1e293b;color:#94a3b8;width:120px;">Visitor</td><td style="padding:0.75rem;border-bottom:1px solid #1e293b;font-weight:600;">${visitorName}</td></tr>
-              <tr><td style="padding:0.75rem;border-bottom:1px solid #1e293b;color:#94a3b8;">Purpose</td><td style="padding:0.75rem;border-bottom:1px solid #1e293b;">${purpose}</td></tr>
-              <tr><td style="padding:0.75rem;color:#94a3b8;">Scheduled</td><td style="padding:0.75rem;">${dateStr}</td></tr>
+            <h2 style="color:#818cf8;margin:0 0 1rem;font-size:1.2rem;">New Visit Request</h2>
+            <p style="color:#94a3b8;margin-bottom:1.5rem;">Hi <strong style="color:#f1f5f9;">${hostName}</strong>, you have a new visit request awaiting approval:</p>
+            <table style="width:100%;border-collapse:collapse;background:#1e293b;border-radius:8px;overflow:hidden;">
+              <tr>
+                <td style="padding:0.8rem 1rem;color:#64748b;font-size:0.8rem;font-weight:600;text-transform:uppercase;border-bottom:1px solid #0f172a;width:110px;">Visitor</td>
+                <td style="padding:0.8rem 1rem;font-weight:600;border-bottom:1px solid #0f172a;">${visitorName}</td>
+              </tr>
+              <tr>
+                <td style="padding:0.8rem 1rem;color:#64748b;font-size:0.8rem;font-weight:600;text-transform:uppercase;border-bottom:1px solid #0f172a;">Purpose</td>
+                <td style="padding:0.8rem 1rem;border-bottom:1px solid #0f172a;color:#94a3b8;">${purpose}</td>
+              </tr>
+              <tr>
+                <td style="padding:0.8rem 1rem;color:#64748b;font-size:0.8rem;font-weight:600;text-transform:uppercase;">Scheduled</td>
+                <td style="padding:0.8rem 1rem;color:#94a3b8;">${dateStr}</td>
+              </tr>
             </table>
-            <p style="color:#94a3b8;font-size:0.875rem;">Login to PassGuard to approve or reject this request.</p>
+            <p style="color:#475569;font-size:0.8rem;margin-top:1.5rem;">Login to PassGuard dashboard to approve or reject this request.</p>
           </div>
         </div>
       `,
-    });
-
-    console.log('📧 Appointment request email sent. Preview:', nodemailer.getTestMessageUrl(info));
-    return info;
+    })
+    console.log('✉️  Request email sent to host:', hostEmail)
+    return true
   } catch (err) {
-    // Email failure should never crash the app
-    console.error('Email send failed:', err.message);
+    console.error('❌ Failed to send request email:', err.message)
+    return false
   }
-};
+}
 
-/**
- * Send QR pass to visitor after approval
- */
-export const sendPassEmail = async ({ visitorEmail, visitorName, hostName, purpose, scheduledDate, qrCodeData, passId }) => {
+// send QR pass to visitor after approval
+export async function sendApprovalEmail({ visitorEmail, visitorName, hostName, purpose, scheduledDate, qrCodeData }) {
   try {
-    const transporter = await createTransporter();
+    const transporter = createTransporter()
     const dateStr = new Date(scheduledDate).toLocaleString('en-US', {
       weekday: 'long', year: 'numeric', month: 'long',
       day: 'numeric', hour: '2-digit', minute: '2-digit',
-    });
+    })
 
-    // QR code as inline image via Google Charts API (no extra package needed)
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrCodeData}`;
+    // use qrserver.com to generate QR image inline - no extra package needed
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${qrCodeData}&bgcolor=0f172a&color=f1f5f9&qzone=2`
 
     const info = await transporter.sendMail({
-      from: `"PassGuard" <${process.env.EMAIL_USER || 'noreply@passguard.io'}>`,
+      from: FROM(),
       to: visitorEmail,
-      subject: `Your Visit Pass is Ready — ${dateStr}`,
+      subject: `✅ Your Visit is Approved — QR Pass Inside`,
       html: `
-        <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;background:#0f172a;color:#f1f5f9;border-radius:12px;overflow:hidden;">
-          <div style="background:linear-gradient(135deg,#6366f1,#06b6d4);padding:2rem;text-align:center;">
-            <h1 style="margin:0;font-size:1.5rem;color:white;">🛡️ PassGuard</h1>
-            <p style="margin:0.5rem 0 0;color:rgba(255,255,255,0.8);font-size:0.9rem;">Your Visit Pass</p>
+        <div style="font-family:Inter,Arial,sans-serif;max-width:580px;margin:0 auto;background:#0f172a;color:#f1f5f9;border-radius:12px;overflow:hidden;border:1px solid #1e293b;">
+          <div style="background:linear-gradient(135deg,#6366f1,#06b6d4);padding:1.75rem 2rem;">
+            <h1 style="margin:0;font-size:1.4rem;color:white;font-weight:800;">🛡️ PassGuard</h1>
+            <p style="margin:0.4rem 0 0;color:rgba(255,255,255,0.75);font-size:0.875rem;">Your Visitor Pass</p>
           </div>
           <div style="padding:2rem;text-align:center;">
-            <h2 style="color:#34d399;margin-top:0;">✅ Visit Approved!</h2>
-            <p>Hi <strong>${visitorName}</strong>, your visit has been approved.</p>
-            <div style="background:#1e293b;border-radius:12px;padding:1.5rem;margin:1.5rem 0;display:inline-block;">
-              <img src="${qrImageUrl}" alt="QR Pass" style="width:200px;height:200px;display:block;" />
-              <p style="margin:0.75rem 0 0;color:#94a3b8;font-size:0.75rem;">Show this QR code at the entrance</p>
+            <div style="width:64px;height:64px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;font-size:1.8rem;">✅</div>
+            <h2 style="color:#34d399;margin:0 0 0.5rem;font-size:1.3rem;">Visit Approved!</h2>
+            <p style="color:#94a3b8;margin-bottom:1.75rem;">Hi <strong style="color:#f1f5f9;">${visitorName}</strong>, your visit has been approved. Show the QR code below at the security desk.</p>
+            
+            <div style="background:#1e293b;border-radius:12px;padding:1.5rem;display:inline-block;margin-bottom:1.75rem;border:1px solid #334155;">
+              <img src="${qrImageUrl}" alt="Your QR Pass" style="width:220px;height:220px;display:block;border-radius:8px;" />
+              <p style="margin:0.75rem 0 0;color:#64748b;font-size:0.75rem;">Valid for 24 hours from your scheduled time</p>
             </div>
-            <table style="width:100%;border-collapse:collapse;margin:1rem 0;text-align:left;">
-              <tr><td style="padding:0.75rem;border-bottom:1px solid #1e293b;color:#94a3b8;width:120px;">Host</td><td style="padding:0.75rem;border-bottom:1px solid #1e293b;font-weight:600;">${hostName}</td></tr>
-              <tr><td style="padding:0.75rem;border-bottom:1px solid #1e293b;color:#94a3b8;">Purpose</td><td style="padding:0.75rem;border-bottom:1px solid #1e293b;">${purpose}</td></tr>
-              <tr><td style="padding:0.75rem;color:#94a3b8;">Scheduled</td><td style="padding:0.75rem;">${dateStr}</td></tr>
+
+            <table style="width:100%;border-collapse:collapse;background:#1e293b;border-radius:8px;overflow:hidden;text-align:left;margin-bottom:1.5rem;">
+              <tr>
+                <td style="padding:0.8rem 1rem;color:#64748b;font-size:0.8rem;font-weight:600;text-transform:uppercase;border-bottom:1px solid #0f172a;width:100px;">Host</td>
+                <td style="padding:0.8rem 1rem;font-weight:600;border-bottom:1px solid #0f172a;">${hostName}</td>
+              </tr>
+              <tr>
+                <td style="padding:0.8rem 1rem;color:#64748b;font-size:0.8rem;font-weight:600;text-transform:uppercase;border-bottom:1px solid #0f172a;">Purpose</td>
+                <td style="padding:0.8rem 1rem;color:#94a3b8;border-bottom:1px solid #0f172a;">${purpose}</td>
+              </tr>
+              <tr>
+                <td style="padding:0.8rem 1rem;color:#64748b;font-size:0.8rem;font-weight:600;text-transform:uppercase;">Date</td>
+                <td style="padding:0.8rem 1rem;color:#94a3b8;">${dateStr}</td>
+              </tr>
             </table>
-            <p style="color:#94a3b8;font-size:0.8rem;margin-top:1.5rem;">Pass valid for 24 hours from your scheduled time. Present this QR at security.</p>
+            <p style="color:#475569;font-size:0.78rem;">Present this QR code at the entrance. The security staff will scan it to let you in.</p>
           </div>
         </div>
       `,
-    });
-
-    console.log('📧 Pass email sent to visitor. Preview:', nodemailer.getTestMessageUrl(info));
-    return info;
+    })
+    console.log('✉️  Approval + QR pass email sent to visitor:', visitorEmail)
+    return true
   } catch (err) {
-    console.error('Email send failed:', err.message);
+    console.error('❌ Failed to send approval email:', err.message)
+    return false
   }
-};
+}
+
+// send rejection notice to visitor
+export async function sendRejectionEmail({ visitorEmail, visitorName, hostName, purpose }) {
+  try {
+    const transporter = createTransporter()
+
+    await transporter.sendMail({
+      from: FROM(),
+      to: visitorEmail,
+      subject: `Update on Your Visit Request to ${hostName}`,
+      html: `
+        <div style="font-family:Inter,Arial,sans-serif;max-width:580px;margin:0 auto;background:#0f172a;color:#f1f5f9;border-radius:12px;overflow:hidden;border:1px solid #1e293b;">
+          <div style="background:linear-gradient(135deg,#6366f1,#06b6d4);padding:1.75rem 2rem;">
+            <h1 style="margin:0;font-size:1.4rem;color:white;font-weight:800;">🛡️ PassGuard</h1>
+          </div>
+          <div style="padding:2rem;text-align:center;">
+            <div style="font-size:1.8rem;margin-bottom:1rem;">❌</div>
+            <h2 style="color:#f87171;margin:0 0 0.75rem;font-size:1.2rem;">Visit Request Not Approved</h2>
+            <p style="color:#94a3b8;margin-bottom:1rem;">Hi <strong style="color:#f1f5f9;">${visitorName}</strong>,</p>
+            <p style="color:#94a3b8;margin-bottom:1.5rem;">Unfortunately your visit request to meet <strong style="color:#f1f5f9;">${hostName}</strong> regarding "<em>${purpose}</em>" was not approved at this time.</p>
+            <p style="color:#475569;font-size:0.8rem;">Please contact the host directly if you believe this is an error.</p>
+          </div>
+        </div>
+      `,
+    })
+    console.log('✉️  Rejection email sent to visitor:', visitorEmail)
+    return true
+  } catch (err) {
+    console.error('❌ Failed to send rejection email:', err.message)
+    return false
+  }
+}
