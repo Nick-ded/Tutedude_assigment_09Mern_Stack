@@ -5,7 +5,7 @@ const axios = api;
 import {
   Users, UserCheck, Calendar, QrCode, Search,
   TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle,
-  ChevronRight, RefreshCw
+  ChevronRight, RefreshCw, Download, FileText
 } from 'lucide-react';
 
 /* ── helpers ── */
@@ -32,8 +32,8 @@ export default function Dashboard() {
     else setRefreshing(true);
     try {
       const [a, v] = await Promise.all([
-        axios.get('/api/appointments'),
-        axios.get('/api/visitors'),
+        axios.get('/appointments'),
+        axios.get('/visitors'),
       ]);
       setAppointments(a.data);
       setVisitors(v.data);
@@ -41,8 +41,37 @@ export default function Dashboard() {
     finally { setLoading(false); setRefreshing(false); }
   };
 
-  const approve = async (id) => { await axios.put(`/api/appointments/${id}/approve`); load(true); };
-  const reject  = async (id) => { await axios.put(`/api/appointments/${id}/reject`);  load(true); };
+  const approve = async (id) => { await axios.put(`/appointments/${id}/approve`); load(true); };
+  const reject  = async (id) => { await axios.put(`/appointments/${id}/reject`);  load(true); };
+
+  // ── Export CSV of check logs ──
+  const exportCSV = async () => {
+    try {
+      const res = await axios.get('/checklogs/export', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a   = document.createElement('a');
+      a.href    = url;
+      a.download = `checklogs-${Date.now()}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) { console.error('CSV export failed', e); }
+  };
+
+  // ── Download PDF pass for an appointment ──
+  const downloadPDF = async (apt) => {
+    try {
+      // Find pass for this appointment
+      const passRes = await axios.get(`/passes/appointment/${apt._id}`).catch(() => null);
+      if (!passRes) { alert('No pass found for this appointment (not approved yet?)'); return; }
+      const res = await axios.get(`/passes/${passRes.data._id}/pdf`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const a   = document.createElement('a');
+      a.href    = url;
+      a.download = `pass-${apt.visitor?.name || 'visitor'}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) { console.error('PDF download failed', e); }
+  };
 
   const today = new Date().toDateString();
   const stats = [
@@ -76,15 +105,27 @@ export default function Dashboard() {
             Here's what's happening at your facility today.
           </p>
         </div>
-        <button
-          className="btn btn-ghost"
-          style={{ gap: '0.4rem', fontSize: '0.85rem' }}
-          onClick={() => load(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw size={15} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {(user.role === 'Admin' || user.role === 'Security') && (
+            <button
+              className="btn btn-ghost"
+              style={{ gap: '0.4rem', fontSize: '0.85rem' }}
+              onClick={exportCSV}
+              title="Export check logs as CSV"
+            >
+              <Download size={15} /> Export CSV
+            </button>
+          )}
+          <button
+            className="btn btn-ghost"
+            style={{ gap: '0.4rem', fontSize: '0.85rem' }}
+            onClick={() => load(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw size={15} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* ── Stat cards ── */}
@@ -155,7 +196,7 @@ export default function Dashboard() {
             {appointments.length === 0
               ? <Empty text="No appointments found" />
               : appointments.map(a => (
-                <AppointmentRow key={a._id} a={a} user={user} onApprove={approve} onReject={reject} />
+                <AppointmentRow key={a._id} a={a} user={user} onApprove={approve} onReject={reject} onPDF={downloadPDF} />
               ))
             }
           </>
@@ -225,7 +266,7 @@ export default function Dashboard() {
 
 /* ── Sub-components ── */
 
-function AppointmentRow({ a, user, onApprove, onReject }) {
+function AppointmentRow({ a, user, onApprove, onReject, onPDF }) {
   const meta = statusMeta[a.status] || statusMeta.Pending;
   return (
     <div style={{
@@ -248,16 +289,28 @@ function AppointmentRow({ a, user, onApprove, onReject }) {
       <span className={`badge ${meta.cls}`} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
         {meta.icon}{a.status}
       </span>
-      {a.status === 'Pending' && (user.role === 'Admin' || user.role === 'Employee') && (
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <button className="btn btn-success" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }} onClick={() => onApprove(a._id)}>
-            Approve
+      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+        {a.status === 'Pending' && (user.role === 'Admin' || user.role === 'Employee') && (
+          <>
+            <button className="btn btn-success" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }} onClick={() => onApprove(a._id)}>
+              Approve
+            </button>
+            <button className="btn btn-danger" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }} onClick={() => onReject(a._id)}>
+              Reject
+            </button>
+          </>
+        )}
+        {a.status === 'Approved' && (
+          <button
+            className="btn btn-ghost"
+            style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem', gap: '0.3rem', border: '1px solid var(--border)' }}
+            onClick={() => onPDF && onPDF(a)}
+            title="Download PDF Pass"
+          >
+            <FileText size={13} /> PDF
           </button>
-          <button className="btn btn-danger" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }} onClick={() => onReject(a._id)}>
-            Reject
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

@@ -2,20 +2,20 @@ import Appointment from '../models/Appointment.js';
 import Pass from '../models/Pass.js';
 import Visitor from '../models/Visitor.js';
 import crypto from 'crypto';
+import { sendAppointmentRequestEmail, sendPassEmail } from '../utils/sendEmail.js';
 
-// @desc    Create an appointment (by a logged-in host/employee)
+// @desc    Create appointment (logged-in host)
 // @route   POST /api/appointments
 // @access  Private
 export const createAppointment = async (req, res) => {
   try {
     const { visitorId, purpose, expectedDate } = req.body;
-    const hostId = req.user._id;
 
     const appointment = await Appointment.create({
-      host: hostId,
+      host: req.user._id,
       visitor: visitorId,
       purpose,
-      expectedDate
+      expectedDate,
     });
 
     res.status(201).json(appointment);
@@ -25,32 +25,30 @@ export const createAppointment = async (req, res) => {
   }
 };
 
-// @desc    Visitor self-registers with appointment request
+// @desc    Visitor self pre-registration
 // @route   POST /api/appointments/pre-register
 // @access  Public
 export const preRegisterVisitor = async (req, res) => {
   try {
-    const { name, email, phone, company, hostEmail, purpose, scheduledDate, expectedDuration, notes } = req.body;
+    const { name, email, phone, company, hostEmail, purpose, scheduledDate, notes } = req.body;
 
-    // Find or create visitor
+    // Find or create visitor record
     let visitor = await Visitor.findOne({ email });
     if (!visitor) {
       visitor = await Visitor.create({ name, email, phone, company });
     } else {
-      // Update details in case they changed
-      visitor.name = name;
-      visitor.phone = phone;
+      visitor.name    = name;
+      visitor.phone   = phone;
       visitor.company = company;
       await visitor.save();
     }
 
-    // Handle uploaded photo
     if (req.file) {
       visitor.photoUrl = req.file.path;
       await visitor.save();
     }
 
-    // Find host by email
+    // Resolve host by email
     const User = (await import('../models/User.js')).default;
     const host = await User.findOne({ email: hostEmail });
     if (!host) {
@@ -58,18 +56,27 @@ export const preRegisterVisitor = async (req, res) => {
     }
 
     const appointment = await Appointment.create({
-      host: host._id,
-      visitor: visitor._id,
+      host:         host._id,
+      visitor:      visitor._id,
       purpose,
       expectedDate: new Date(scheduledDate),
-      notes: notes || ''
+      notes:        notes || '',
+    });
+
+    // Notify host via email (non-blocking)
+    sendAppointmentRequestEmail({
+      hostEmail:     host.email,
+      hostName:      host.name,
+      visitorName:   visitor.name,
+      purpose,
+      scheduledDate: appointment.expectedDate,
     });
 
     res.status(201).json({
       message: 'Pre-registration successful. Awaiting host approval.',
       appointmentId: appointment._id,
       visitor,
-      appointment
+      appointment,
     });
   } catch (error) {
     console.error(error);
@@ -77,59 +84,67 @@ export const preRegisterVisitor = async (req, res) => {
   }
 };
 
-// @desc    Get all appointments (Admin/Security) or host's own appointments
+// @desc    Get appointments (all for Admin/Security, own for Employee)
 // @route   GET /api/appointments
 // @access  Private
 export const getAppointments = async (req, res) => {
   try {
-    let appointments;
-    if (req.user.role === 'Admin' || req.user.role === 'Security') {
-      appointments = await Appointment.find({})
-        .populate('host', 'name email')
-        .populate('visitor', 'name email phone company')
-        .sort({ createdAt: -1 });
-    } else {
-      appointments = await Appointment.find({ host: req.user._id })
-        .populate('host', 'name email')
-        .populate('visitor', 'name email phone company')
-        .sort({ createdAt: -1 });
-    }
+    const query = (req.user.role === 'Admin' || req.user.role === 'Security')
+      ? {}
+      : { host: req.user._id };
+
+    const appointments = await Appointment.find(query)
+      .populate('host',    'name email')
+      .populate('visitor', 'name email phone company')
+      .sort({ createdAt: -1 });
+
     res.json(appointments);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// @desc    Approve appointment & auto-issue a pass
+// @desc    Approve appointment and issue QR pass
 // @route   PUT /api/appointments/:id/approve
-// @access  Private (Admin or the host)
+// @access  Private (Admin or host)
 export const approveAppointment = async (req, res) => {
   try {
-    const appointment = await Appointment.findById(req.params.id);
+    const appointment = await Appointment.findById(req.params.id)
+      .populate('host',    'name email')
+      .populate('visitor', 'name email');
 
     if (!appointment) {
       return res.status(404).json({ message: 'Appointment not found' });
     }
 
-    if (appointment.host.toString() !== req.user._id.toString() && req.user.role !== 'Admin') {
+    if (appointment.host._id.toString() !== req.user._id.toString() && req.user.role !== 'Admin') {
       return res.status(403).json({ message: 'Not authorized to approve this appointment' });
     }
 
     appointment.status = 'Approved';
     await appointment.save();
 
-    // Generate unique QR token
+    // Generate cryptographically unique QR token
     const qrCodeData = crypto.randomBytes(20).toString('hex');
-
-    // Valid from scheduled time for 24 hours
-    const validFrom = appointment.expectedDate;
+    const validFrom  = appointment.expectedDate;
     const validUntil = new Date(new Date(validFrom).getTime() + 24 * 60 * 60 * 1000);
 
     const pass = await Pass.create({
       appointment: appointment._id,
       qrCodeData,
       validFrom,
-      validUntil
+      validUntil,
+    });
+
+    // Email QR pass to visitor (non-blocking)
+    sendPassEmail({
+      visitorEmail:  appointment.visitor.email,
+      visitorName:   appointment.visitor.name,
+      hostName:      appointment.host.name,
+      purpose:       appointment.purpose,
+      scheduledDate: appointment.expectedDate,
+      qrCodeData,
+      passId:        pass._id,
     });
 
     res.json({ appointment, pass });
@@ -139,9 +154,9 @@ export const approveAppointment = async (req, res) => {
   }
 };
 
-// @desc    Reject an appointment
+// @desc    Reject appointment
 // @route   PUT /api/appointments/:id/reject
-// @access  Private (Admin or the host)
+// @access  Private (Admin or host)
 export const rejectAppointment = async (req, res) => {
   try {
     const appointment = await Appointment.findById(req.params.id);

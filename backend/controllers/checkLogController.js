@@ -93,8 +93,55 @@ export const getCheckLogs = async (req, res) => {
   }
 };
 
-// @desc    Get recent check logs (last 20)
-// @route   GET /api/checklogs/recent
+// @desc    Export check logs as CSV
+// @route   GET /api/checklogs/export
+// @access  Private (Admin/Security)
+export const exportLogsCSV = async (req, res) => {
+  try {
+    const logs = await CheckLog.find({})
+      .sort({ createdAt: -1 })
+      .populate('securityPersonnel', 'name')
+      .populate({
+        path: 'pass',
+        populate: {
+          path: 'appointment',
+          populate: [
+            { path: 'visitor', select: 'name email company phone' },
+            { path: 'host',    select: 'name email' },
+          ],
+        },
+      });
+
+    // Build CSV rows
+    const header = 'Type,Visitor Name,Visitor Email,Company,Host,Purpose,Check-In Time,Check-Out Time,Security Personnel\n';
+    const rows = logs.map(log => {
+      const apt     = log.pass?.appointment;
+      const visitor = apt?.visitor;
+      const host    = apt?.host;
+      const type    = log.checkOutTime ? 'Check-Out' : 'Check-In';
+      const csvVal  = v => `"${(v || '').toString().replace(/"/g, '""')}"`;
+      return [
+        csvVal(type),
+        csvVal(visitor?.name),
+        csvVal(visitor?.email),
+        csvVal(visitor?.company),
+        csvVal(host?.name),
+        csvVal(apt?.purpose),
+        csvVal(log.checkInTime  ? new Date(log.checkInTime).toLocaleString()  : ''),
+        csvVal(log.checkOutTime ? new Date(log.checkOutTime).toLocaleString() : ''),
+        csvVal(log.securityPersonnel?.name),
+      ].join(',');
+    }).join('\n');
+
+    const csv = header + rows;
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="checklogs-${Date.now()}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
 // @access  Private (Admin/Security)
 export const getRecentLogs = async (req, res) => {
   try {
