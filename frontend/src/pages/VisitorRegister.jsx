@@ -1,307 +1,355 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { User, Mail, Phone, Building, Calendar, Clock, CheckCircle2, ArrowRight, ArrowLeft, Upload } from 'lucide-react';
-import api from '../api';
-const axios = api;
+// VisitorRegister.jsx
+// 3 step form for visitors to pre-register before their visit
+// step 1: personal info, step 2: appointment details, step 3: confirm
 
-const STEPS = ['Your Details', 'Appointment', 'Confirm'];
+import React, { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { User, Mail, Phone, Building, Calendar, Clock, CheckCircle2, ArrowRight, ArrowLeft, Upload } from 'lucide-react'
+import api from '../api'
 
 export default function VisitorRegister() {
-  const navigate = useNavigate();
-  const [step, setStep]         = useState(0);
-  const [hosts, setHosts]       = useState([]);
-  const [loading, setLoading]   = useState(false);
-  const [done, setDone]         = useState(false);
-  const [errors, setErrors]     = useState({});
-  const [serverErr, setServerErr] = useState('');
+  const navigate = useNavigate()
 
+  const [step, setStep]       = useState(0)
+  const [hosts, setHosts]     = useState([])
+  const [loading, setLoading] = useState(false)
+  const [done, setDone]       = useState(false)
+  const [errors, setErrors]   = useState({})
+  const [serverErr, setServerErr] = useState('')
+
+  // form state all in one object
   const [form, setForm] = useState({
-    name: '', email: '', phone: '', company: '', photo: null,
-    hostEmail: '', purpose: '', scheduledDate: '', scheduledTime: '', notes: ''
-  });
+    name: '', email: '', phone: '', company: '',
+    photo: null,
+    hostEmail: '', purpose: '',
+    scheduledDate: '', scheduledTime: '',
+    notes: '',
+  })
 
+  // load hosts list when component mounts
   useEffect(() => {
-    axios.get('/api/users/hosts').then(r => setHosts(r.data)).catch(() => {});
-  }, []);
+    api.get('/users/hosts')
+      .then(r => {
+        setHosts(r.data)
+        console.log('hosts loaded:', r.data.length)
+      })
+      .catch(err => console.log('failed to load hosts:', err.message))
+  }, [])
 
-  const set = (k, v) => {
-    setForm(p => ({ ...p, [k]: v }));
-    setErrors(p => ({ ...p, [k]: '' }));
-  };
+  function updateField(name, value) {
+    setForm(prev => ({ ...prev, [name]: value }))
+    // clear error for this field when user types
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }))
+  }
 
-  const handleFile = e => {
-    const f = e.target.files[0];
-    if (!f) return;
-    if (!f.type.startsWith('image/')) { setErrors(p => ({ ...p, photo: 'Select an image file' })); return; }
-    if (f.size > 5e6) { setErrors(p => ({ ...p, photo: 'Max 5 MB' })); return; }
-    set('photo', f);
-  };
+  function handleFileChange(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setErrors(prev => ({ ...prev, photo: 'Please select an image file' }))
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrors(prev => ({ ...prev, photo: 'Image too large (max 5MB)' }))
+      return
+    }
+    updateField('photo', file)
+  }
 
-  const validate0 = () => {
-    const e = {};
-    if (!form.name.trim())  e.name  = 'Required';
-    if (!form.email.trim()) e.email = 'Required';
-    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
-    if (!form.phone.trim()) e.phone = 'Required';
-    setErrors(e);
-    return !Object.keys(e).length;
-  };
+  // validation for step 0
+  function validateStep0() {
+    const errs = {}
+    if (!form.name.trim()) errs.name = 'Name is required'
+    if (!form.email.trim()) errs.email = 'Email is required'
+    else if (!form.email.includes('@')) errs.email = 'Invalid email'
+    if (!form.phone.trim()) errs.phone = 'Phone is required'
+    setErrors(errs)
+    return Object.keys(errs).length === 0
+  }
 
-  const validate1 = () => {
-    const e = {};
-    if (!form.hostEmail)        e.hostEmail     = 'Select a host';
-    if (!form.purpose.trim())   e.purpose       = 'Required';
-    if (!form.scheduledDate)    e.scheduledDate = 'Required';
-    if (!form.scheduledTime)    e.scheduledTime = 'Required';
+  // validation for step 1
+  function validateStep1() {
+    const errs = {}
+    if (!form.hostEmail) errs.hostEmail = 'Please select a host'
+    if (!form.purpose.trim()) errs.purpose = 'Purpose is required'
+    if (!form.scheduledDate) errs.scheduledDate = 'Date is required'
+    if (!form.scheduledTime) errs.scheduledTime = 'Time is required'
     if (form.scheduledDate && form.scheduledTime) {
-      if (new Date(`${form.scheduledDate}T${form.scheduledTime}`) <= new Date())
-        e.scheduledDate = 'Must be a future date & time';
+      const dt = new Date(`${form.scheduledDate}T${form.scheduledTime}`)
+      if (dt <= new Date()) {
+        errs.scheduledDate = 'Must be in the future'
+      }
     }
-    setErrors(e);
-    return !Object.keys(e).length;
-  };
+    setErrors(errs)
+    return Object.keys(errs).length === 0
+  }
 
-  const next = () => {
-    if (step === 0 && validate0()) setStep(1);
-    if (step === 1 && validate1()) setStep(2);
-  };
+  function goNext() {
+    if (step === 0 && validateStep0()) setStep(1)
+    else if (step === 1 && validateStep1()) setStep(2)
+  }
 
-  const submit = async () => {
-    setLoading(true);
-    setServerErr('');
+  async function submitForm() {
+    setLoading(true)
+    setServerErr('')
+
     try {
-      const fd = new FormData();
-      ['name','email','phone','company','hostEmail','purpose','notes'].forEach(k => fd.append(k, form[k]));
-      fd.append('scheduledDate', new Date(`${form.scheduledDate}T${form.scheduledTime}`).toISOString());
-      if (form.photo) fd.append('photo', form.photo);
-      await axios.post('/api/appointments/pre-register', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setDone(true);
-    } catch (e) {
-      setServerErr(e.response?.data?.message || 'Submission failed. Please try again.');
+      // use FormData because we might have a photo file
+      const fd = new FormData()
+      fd.append('name', form.name)
+      fd.append('email', form.email)
+      fd.append('phone', form.phone)
+      fd.append('company', form.company)
+      fd.append('hostEmail', form.hostEmail)
+      fd.append('purpose', form.purpose)
+      fd.append('notes', form.notes)
+
+      // combine date and time into ISO string
+      const datetime = new Date(`${form.scheduledDate}T${form.scheduledTime}`)
+      fd.append('scheduledDate', datetime.toISOString())
+
+      if (form.photo) {
+        fd.append('photo', form.photo)
+      }
+
+      await api.post('/appointments/pre-register', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      setDone(true)
+    } catch (err) {
+      console.log('submit error:', err.response?.data)
+      setServerErr(err.response?.data?.message || 'Something went wrong, try again')
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
-  /* ── Success screen ── */
-  if (done) return (
-    <div style={{ minHeight: '90vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-      <div className="glass-panel glow-card animate-fade-up" style={{ maxWidth: '480px', width: '100%', textAlign: 'center' }}>
-        <div style={{ width: '72px', height: '72px', borderRadius: '20px', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem', boxShadow: '0 0 30px rgba(16,185,129,0.3)' }}>
-          <CheckCircle2 size={36} style={{ color: 'var(--success)' }} />
+  // success screen
+  if (done) {
+    return (
+      <div className="flex-center animate-fade-up" style={{ minHeight: '85vh', padding: '2rem' }}>
+        <div className="glass-panel" style={{ maxWidth: 460, width: '100%', textAlign: 'center' }}>
+          <div style={{ width: 68, height: 68, borderRadius: 18, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem' }}>
+            <CheckCircle2 size={34} style={{ color: '#10b981' }} />
+          </div>
+          <h2 style={{ fontSize: '1.6rem', marginBottom: '0.6rem' }}>You're all set!</h2>
+          <p style={{ color: '#64748b', marginBottom: '1.75rem', lineHeight: 1.7 }}>
+            Your visit request has been sent to the host.<br />
+            You'll receive a QR pass by email once they approve.
+          </p>
+          <ul style={{ listStyle: 'none', textAlign: 'left', marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {[
+              'Host notified of your request',
+              'Confirmation email sent when approved',
+              'QR pass emailed to you',
+            ].map((item, i) => (
+              <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem 0.85rem', background: 'rgba(16,185,129,0.05)', borderRadius: 8, border: '1px solid rgba(16,185,129,0.12)', fontSize: '0.875rem', color: '#94a3b8' }}>
+                <CheckCircle2 size={15} style={{ color: '#10b981', flexShrink: 0 }} /> {item}
+              </li>
+            ))}
+          </ul>
+          <Link to="/login" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem' }}>
+            Staff Login <ArrowRight size={16} />
+          </Link>
         </div>
-        <h2 style={{ fontSize: '1.75rem', marginBottom: '0.75rem' }}>You're all set!</h2>
-        <p style={{ color: 'var(--text-muted)', marginBottom: '2rem', lineHeight: '1.8' }}>
-          Your visit request has been sent to <strong style={{ color: 'var(--text)' }}>{form.hostEmail}</strong>.<br />
-          You'll receive a QR pass by email once approved.
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '2rem' }}>
-          {['Request sent to host for approval', 'Confirmation email will be sent', 'QR code pass will be generated'].map((t, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: '10px', padding: '0.75rem 1rem' }}>
-              <CheckCircle2 size={16} style={{ color: 'var(--success)', flexShrink: 0 }} />
-              <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{t}</span>
-            </div>
-          ))}
-        </div>
-        <Link to="/login" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.85rem' }}>
-          Go to Staff Login <ArrowRight size={16} />
-        </Link>
       </div>
-    </div>
-  );
+    )
+  }
 
-  const selectedHost = hosts.find(h => h.email === form.hostEmail);
+  const selectedHost = hosts.find(h => h.email === form.hostEmail)
 
   return (
-    <div style={{ minHeight: '90vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-      <div style={{ width: '100%', maxWidth: '560px' }}>
-        {/* Title */}
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }} className="animate-fade-up">
-          <h1 style={{ fontSize: '2.25rem', marginBottom: '0.5rem' }}>
+    <div className="flex-center animate-fade-up" style={{ minHeight: '88vh', padding: '2rem 1rem' }}>
+      <div style={{ width: '100%', maxWidth: 540 }}>
+
+        {/* title */}
+        <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: '0.4rem' }}>
             Pre-register your <span className="gradient-text">visit</span>
           </h1>
-          <p style={{ color: 'var(--text-muted)' }}>Book your appointment in advance and get a QR pass</p>
+          <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Book your appointment and get a QR pass</p>
         </div>
 
-        {/* Step indicators */}
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2rem' }}>
-          {STEPS.map((s, i) => (
+        {/* step progress */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1.75rem' }}>
+          {['Your Details', 'Appointment', 'Review'].map((label, i) => (
             <React.Fragment key={i}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4rem', flex: 1 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem', flex: 1 }}>
                 <div style={{
-                  width: '36px', height: '36px', borderRadius: '50%',
+                  width: 34, height: 34, borderRadius: '50%',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontWeight: '700', fontSize: '0.875rem',
-                  background: i < step ? 'var(--success)' : i === step ? 'linear-gradient(135deg, var(--primary), var(--primary-dark))' : 'var(--surface2)',
-                  border: i === step ? 'none' : `1px solid ${i < step ? 'var(--success)' : 'var(--border)'}`,
-                  color: i <= step ? 'white' : 'var(--text-dim)',
-                  boxShadow: i === step ? '0 0 15px rgba(99,102,241,0.5)' : 'none',
+                  fontSize: '0.82rem', fontWeight: 700,
+                  background: i < step ? '#10b981' : i === step ? 'linear-gradient(135deg,#6366f1,#4f46e5)' : 'rgba(30,41,59,0.8)',
+                  color: i <= step ? 'white' : '#475569',
+                  border: i < step ? 'none' : i === step ? 'none' : '1px solid rgba(99,102,241,0.2)',
+                  boxShadow: i === step ? '0 0 12px rgba(99,102,241,0.45)' : 'none',
                   transition: 'all 0.3s',
                 }}>
                   {i < step ? <CheckCircle2 size={16} /> : i + 1}
                 </div>
-                <span style={{ fontSize: '0.7rem', color: i === step ? 'var(--primary-light)' : 'var(--text-dim)', fontWeight: i === step ? '600' : '400', whiteSpace: 'nowrap' }}>
-                  {s}
+                <span style={{ fontSize: '0.68rem', color: i === step ? '#818cf8' : '#475569', fontWeight: i === step ? 600 : 400, whiteSpace: 'nowrap' }}>
+                  {label}
                 </span>
               </div>
-              {i < STEPS.length - 1 && (
-                <div style={{ height: '2px', flex: 1, background: i < step ? 'var(--success)' : 'var(--border)', transition: 'background 0.3s', marginBottom: '1.2rem' }} />
+              {i < 2 && (
+                <div style={{ height: 2, flex: 1, background: i < step ? '#10b981' : 'rgba(99,102,241,0.15)', transition: 'background 0.3s', marginBottom: '1.1rem' }} />
               )}
             </React.Fragment>
           ))}
         </div>
 
-        <div className="glass-panel glow-card animate-fade-up">
-          {/* STEP 0 — Personal details */}
+        <div className="glass-panel">
+
+          {/* STEP 0 - personal info */}
           {step === 0 && (
             <>
-              <h3 style={{ marginBottom: '1.5rem' }}>Tell us about yourself</h3>
+              <h3 style={{ marginBottom: '1.4rem' }}>Personal Information</h3>
 
-              <Row>
-                <Field label="Full Name" icon={<User size={14} />} error={errors.name} required>
-                  <input className="form-input" placeholder="Jane Smith" value={form.name} onChange={e => set('name', e.target.value)} />
+              <Field label="Full Name" icon={<User size={13} />} error={errors.name} required>
+                <input className="form-input" name="name" placeholder="Jane Smith" value={form.name}
+                  onChange={e => updateField('name', e.target.value)} />
+              </Field>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <Field label="Email" icon={<Mail size={13} />} error={errors.email} required>
+                  <input className="form-input" type="email" placeholder="jane@example.com" value={form.email}
+                    onChange={e => updateField('email', e.target.value)} />
                 </Field>
-              </Row>
-              <Row cols={2}>
-                <Field label="Email" icon={<Mail size={14} />} error={errors.email} required>
-                  <input className="form-input" type="email" placeholder="jane@example.com" value={form.email} onChange={e => set('email', e.target.value)} />
+                <Field label="Phone" icon={<Phone size={13} />} error={errors.phone} required>
+                  <input className="form-input" type="tel" placeholder="+1 555 000 0000" value={form.phone}
+                    onChange={e => updateField('phone', e.target.value)} />
                 </Field>
-                <Field label="Phone" icon={<Phone size={14} />} error={errors.phone} required>
-                  <input className="form-input" type="tel" placeholder="+1 555 000 0000" value={form.phone} onChange={e => set('phone', e.target.value)} />
-                </Field>
-              </Row>
-              <Row>
-                <Field label="Company / Organisation" icon={<Building size={14} />}>
-                  <input className="form-input" placeholder="Acme Corp (optional)" value={form.company} onChange={e => set('company', e.target.value)} />
-                </Field>
-              </Row>
-              <Row>
-                <Field label="Photo" icon={<Upload size={14} />} error={errors.photo}>
-                  <label style={{
-                    display: 'flex', alignItems: 'center', gap: '0.75rem',
-                    padding: '0.75rem 1rem', borderRadius: '10px',
-                    background: 'rgba(15,23,42,0.8)', border: '1px dashed var(--border)',
-                    cursor: 'pointer', transition: 'border-color 0.2s',
-                  }}>
-                    <Upload size={18} style={{ color: 'var(--text-dim)' }} />
-                    <span style={{ color: form.photo ? 'var(--primary-light)' : 'var(--text-dim)', fontSize: '0.9rem' }}>
-                      {form.photo ? form.photo.name : 'Click to upload photo (optional, max 5 MB)'}
-                    </span>
-                    <input type="file" accept="image/*" onChange={handleFile} style={{ display: 'none' }} />
-                  </label>
-                </Field>
-              </Row>
+              </div>
+
+              <Field label="Company (optional)" icon={<Building size={13} />}>
+                <input className="form-input" placeholder="Acme Corp" value={form.company}
+                  onChange={e => updateField('company', e.target.value)} />
+              </Field>
+
+              <Field label="Photo (optional)" icon={<Upload size={13} />} error={errors.photo}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0.65rem 0.9rem', borderRadius: 8, background: 'rgba(15,23,42,0.9)', border: '1px dashed rgba(99,102,241,0.2)', cursor: 'pointer' }}>
+                  <Upload size={16} style={{ color: '#475569' }} />
+                  <span style={{ fontSize: '0.875rem', color: form.photo ? '#818cf8' : '#475569' }}>
+                    {form.photo ? form.photo.name : 'Click to upload (max 5MB)'}
+                  </span>
+                  <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
+                </label>
+              </Field>
             </>
           )}
 
-          {/* STEP 1 — Appointment */}
+          {/* STEP 1 - appointment details */}
           {step === 1 && (
             <>
-              <h3 style={{ marginBottom: '1.5rem' }}>Schedule your appointment</h3>
+              <h3 style={{ marginBottom: '1.4rem' }}>Appointment Details</h3>
 
-              <Row>
-                <Field label="Host / Person to Meet" error={errors.hostEmail} required>
-                  <select className="form-input" value={form.hostEmail} onChange={e => set('hostEmail', e.target.value)}>
-                    <option value="">Select a host…</option>
-                    {hosts.map(h => (
-                      <option key={h._id} value={h.email}>{h.name} — {h.email}</option>
-                    ))}
-                  </select>
+              <Field label="Host / Person to Meet" error={errors.hostEmail} required>
+                <select className="form-input" value={form.hostEmail}
+                  onChange={e => updateField('hostEmail', e.target.value)}>
+                  <option value="">Select a host...</option>
+                  {hosts.map(h => (
+                    <option key={h._id} value={h.email}>{h.name} — {h.email}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Purpose of Visit" error={errors.purpose} required>
+                <textarea className="form-input" rows={3} placeholder="e.g. Business meeting, Interview..."
+                  value={form.purpose} onChange={e => updateField('purpose', e.target.value)} />
+              </Field>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <Field label="Date" icon={<Calendar size={13} />} error={errors.scheduledDate} required>
+                  <input className="form-input" type="date"
+                    min={new Date().toISOString().split('T')[0]}
+                    value={form.scheduledDate}
+                    onChange={e => updateField('scheduledDate', e.target.value)} />
                 </Field>
-              </Row>
-              <Row>
-                <Field label="Purpose of Visit" error={errors.purpose} required>
-                  <textarea className="form-input" rows={3} placeholder="e.g. Business meeting, Interview, Delivery…" value={form.purpose} onChange={e => set('purpose', e.target.value)} />
+                <Field label="Time" icon={<Clock size={13} />} error={errors.scheduledTime} required>
+                  <input className="form-input" type="time"
+                    value={form.scheduledTime}
+                    onChange={e => updateField('scheduledTime', e.target.value)} />
                 </Field>
-              </Row>
-              <Row cols={2}>
-                <Field label="Date" icon={<Calendar size={14} />} error={errors.scheduledDate} required>
-                  <input className="form-input" type="date" min={new Date().toISOString().split('T')[0]} value={form.scheduledDate} onChange={e => set('scheduledDate', e.target.value)} />
-                </Field>
-                <Field label="Time" icon={<Clock size={14} />} error={errors.scheduledTime} required>
-                  <input className="form-input" type="time" value={form.scheduledTime} onChange={e => set('scheduledTime', e.target.value)} />
-                </Field>
-              </Row>
-              <Row>
-                <Field label="Additional Notes">
-                  <textarea className="form-input" rows={2} placeholder="Any special requirements…" value={form.notes} onChange={e => set('notes', e.target.value)} />
-                </Field>
-              </Row>
+              </div>
+
+              <Field label="Notes (optional)">
+                <textarea className="form-input" rows={2} placeholder="Any special requirements..."
+                  value={form.notes} onChange={e => updateField('notes', e.target.value)} />
+              </Field>
             </>
           )}
 
-          {/* STEP 2 — Confirm */}
+          {/* STEP 2 - review before submit */}
           {step === 2 && (
             <>
-              <h3 style={{ marginBottom: '1.5rem' }}>Confirm your details</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.5rem' }}>
+              <h3 style={{ marginBottom: '1.4rem' }}>Review & Submit</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
                 {[
-                  { label: 'Name',       value: form.name },
-                  { label: 'Email',      value: form.email },
-                  { label: 'Phone',      value: form.phone },
-                  { label: 'Company',    value: form.company || '—' },
-                  { label: 'Host',       value: selectedHost ? `${selectedHost.name} (${selectedHost.email})` : form.hostEmail },
-                  { label: 'Purpose',    value: form.purpose },
-                  { label: 'Date & Time', value: form.scheduledDate && form.scheduledTime ? new Date(`${form.scheduledDate}T${form.scheduledTime}`).toLocaleString() : '—' },
-                ].map(row => (
-                  <div key={row.label} style={{ display: 'flex', gap: '1rem', padding: '0.75rem 1rem', background: 'rgba(15,23,42,0.5)', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                    <span style={{ width: '90px', flexShrink: 0, color: 'var(--text-dim)', fontSize: '0.8rem', fontWeight: '500', paddingTop: '0.05rem' }}>{row.label}</span>
-                    <span style={{ color: 'var(--text)', fontSize: '0.9rem', fontWeight: '500' }}>{row.value}</span>
+                  ['Name',       form.name],
+                  ['Email',      form.email],
+                  ['Phone',      form.phone],
+                  ['Company',    form.company || '—'],
+                  ['Host',       selectedHost ? `${selectedHost.name} (${selectedHost.email})` : form.hostEmail],
+                  ['Purpose',    form.purpose],
+                  ['Date & Time', form.scheduledDate && form.scheduledTime
+                    ? new Date(`${form.scheduledDate}T${form.scheduledTime}`).toLocaleString()
+                    : '—'],
+                ].map(([label, val]) => (
+                  <div key={label} style={{ display: 'flex', gap: '0.75rem', padding: '0.65rem 0.9rem', background: 'rgba(15,23,42,0.6)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.1)' }}>
+                    <span style={{ width: 90, flexShrink: 0, color: '#475569', fontSize: '0.78rem', fontWeight: 500, paddingTop: 2 }}>{label}</span>
+                    <span style={{ fontSize: '0.875rem', color: '#f1f5f9', fontWeight: 500 }}>{val}</span>
                   </div>
                 ))}
               </div>
+
               {serverErr && (
-                <div style={{ padding: '0.9rem 1rem', borderRadius: '10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                <div style={{ padding: '0.8rem', borderRadius: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: '#f87171', fontSize: '0.875rem', marginBottom: '1rem' }}>
                   ⚠️ {serverErr}
                 </div>
               )}
             </>
           )}
 
-          {/* Navigation */}
-          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border)' }}>
+          {/* nav buttons */}
+          <div style={{ display: 'flex', gap: '0.65rem', marginTop: '1.4rem', paddingTop: '1.4rem', borderTop: '1px solid rgba(99,102,241,0.12)' }}>
             {step > 0 && (
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setStep(s => s - 1)}>
-                <ArrowLeft size={16} /> Back
+                <ArrowLeft size={15} /> Back
               </button>
             )}
             {step < 2 ? (
-              <button className="btn btn-primary" style={{ flex: 2 }} onClick={next}>
-                Continue <ArrowRight size={16} />
+              <button className="btn btn-primary" style={{ flex: 2 }} onClick={goNext}>
+                Continue <ArrowRight size={15} />
               </button>
             ) : (
-              <button className="btn btn-primary" style={{ flex: 2, padding: '0.85rem' }} onClick={submit} disabled={loading}>
+              <button className="btn btn-primary" style={{ flex: 2, padding: '0.8rem' }} onClick={submitForm} disabled={loading}>
                 {loading
-                  ? <><span className="spinner" style={{ width: '18px', height: '18px', borderWidth: '2px' }} /> Submitting…</>
-                  : <>Submit Registration <ArrowRight size={16} /></>
+                  ? <><span className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} /> Submitting...</>
+                  : <>Submit Registration <ArrowRight size={15} /></>
                 }
               </button>
             )}
           </div>
         </div>
 
-        <p style={{ textAlign: 'center', marginTop: '1.25rem', color: 'var(--text-dim)', fontSize: '0.875rem' }}>
-          Already a staff member?{' '}
-          <Link to="/login" style={{ color: 'var(--primary-light)', fontWeight: '600' }}>Login here →</Link>
+        <p style={{ textAlign: 'center', marginTop: '1.1rem', color: '#475569', fontSize: '0.85rem' }}>
+          Already a staff member? <Link to="/login" style={{ color: '#818cf8', fontWeight: 600 }}>Login →</Link>
         </p>
       </div>
     </div>
-  );
+  )
 }
 
-/* ── tiny layout helpers ── */
-const Row = ({ children, cols = 1 }) => (
-  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: '1rem' }}>
-    {children}
-  </div>
-);
-
-const Field = ({ label, icon, error, required, children }) => (
-  <div style={{ marginBottom: '1.1rem' }}>
-    <label className="form-label">
-      {icon}{label}{required && <span style={{ color: 'var(--danger)', marginLeft: '2px' }}>*</span>}
-    </label>
-    {children}
-    {error && <p style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: '0.3rem' }}>{error}</p>}
-  </div>
-);
+// small reusable field wrapper
+function Field({ label, icon, error, required, children }) {
+  return (
+    <div style={{ marginBottom: '1.1rem' }}>
+      <label className="form-label">
+        {icon} {label}{required && <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>}
+      </label>
+      {children}
+      {error && <p style={{ color: '#f87171', fontSize: '0.76rem', marginTop: '0.25rem' }}>{error}</p>}
+    </div>
+  )
+}

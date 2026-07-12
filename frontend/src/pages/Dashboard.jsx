@@ -1,220 +1,312 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { AuthContext } from '../context/AuthContext';
-import api from '../api';
-const axios = api;
-import {
-  Users, UserCheck, Calendar, QrCode, Search,
-  TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle,
-  ChevronRight, RefreshCw, Download, FileText
-} from 'lucide-react';
+// Dashboard.jsx
+// shows stats, appointments and visitors after login
+// todo: add charts later maybe with recharts
 
-/* ── helpers ── */
-const fmtDate = d => d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-const statusMeta = {
-  Pending:  { cls: 'badge-warning', icon: <Clock size={11} /> },
-  Approved: { cls: 'badge-success', icon: <CheckCircle2 size={11} /> },
-  Rejected: { cls: 'badge-danger',  icon: <XCircle size={11} /> },
-};
+import React, { useState, useEffect, useContext } from 'react'
+import { AuthContext } from '../context/AuthContext'
+import api from '../api'
+import { Users, UserCheck, Calendar, AlertCircle, Search, RefreshCw, Download, FileText, CheckCircle2, XCircle, Clock, ChevronRight } from 'lucide-react'
+
+// helper to format date nicely
+function formatDate(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  })
+}
+
+// status color/icon lookup - probably could do this cleaner
+const STATUS = {
+  Pending:  { badge: 'badge-warning', icon: <Clock size={11} /> },
+  Approved: { badge: 'badge-success', icon: <CheckCircle2 size={11} /> },
+  Rejected: { badge: 'badge-danger',  icon: <XCircle size={11} /> },
+}
+
+// small avatar with initials - generates a color based on name
+function Avatar({ name }) {
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  // simple hash to get a consistent hue
+  const hue = [...name].reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
+  return (
+    <div style={{
+      width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+      background: `hsl(${hue},50%,22%)`,
+      border: `1px solid hsl(${hue},50%,38%)`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '0.72rem', fontWeight: 700,
+      color: `hsl(${hue},70%,80%)`
+    }}>
+      {initials}
+    </div>
+  )
+}
 
 export default function Dashboard() {
-  const { user } = useContext(AuthContext);
-  const [appointments, setAppointments] = useState([]);
-  const [visitors, setVisitors] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('overview');
-  const [search, setSearch] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
+  const { user } = useContext(AuthContext)
 
-  useEffect(() => { load(); }, []);
+  const [appointments, setAppointments] = useState([])
+  const [visitors, setVisitors] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [activeTab, setActiveTab] = useState('overview')
+  const [searchText, setSearchText] = useState('')
 
-  const load = async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
+  // load data on mount
+  useEffect(() => {
+    fetchAll()
+  }, [])
+
+  async function fetchAll(quiet = false) {
+    if (quiet) setRefreshing(true)
+    else setLoading(true)
+
     try {
-      const [a, v] = await Promise.all([
-        axios.get('/appointments'),
-        axios.get('/visitors'),
-      ]);
-      setAppointments(a.data);
-      setVisitors(v.data);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); setRefreshing(false); }
-  };
+      // fetch both at the same time
+      const [aptRes, visRes] = await Promise.all([
+        api.get('/appointments'),
+        api.get('/visitors'),
+      ])
+      setAppointments(aptRes.data)
+      setVisitors(visRes.data)
+    } catch (err) {
+      console.log('fetch error:', err.message)
+      // TODO: show a proper error message to user
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }
 
-  const approve = async (id) => { await axios.put(`/appointments/${id}/approve`); load(true); };
-  const reject  = async (id) => { await axios.put(`/appointments/${id}/reject`);  load(true); };
-
-  // ── Export CSV of check logs ──
-  const exportCSV = async () => {
+  async function handleApprove(id) {
     try {
-      const res = await axios.get('/checklogs/export', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a   = document.createElement('a');
-      a.href    = url;
-      a.download = `checklogs-${Date.now()}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (e) { console.error('CSV export failed', e); }
-  };
+      await api.put(`/appointments/${id}/approve`)
+      fetchAll(true)
+    } catch (err) {
+      console.log('approve failed:', err.message)
+      alert('Could not approve appointment')
+    }
+  }
 
-  // ── Download PDF pass for an appointment ──
-  const downloadPDF = async (apt) => {
+  async function handleReject(id) {
     try {
-      // Find pass for this appointment
-      const passRes = await axios.get(`/passes/appointment/${apt._id}`).catch(() => null);
-      if (!passRes) { alert('No pass found for this appointment (not approved yet?)'); return; }
-      const res = await axios.get(`/passes/${passRes.data._id}/pdf`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-      const a   = document.createElement('a');
-      a.href    = url;
-      a.download = `pass-${apt.visitor?.name || 'visitor'}.pdf`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (e) { console.error('PDF download failed', e); }
-  };
+      await api.put(`/appointments/${id}/reject`)
+      fetchAll(true)
+    } catch (err) {
+      console.log('reject failed:', err.message)
+    }
+  }
 
-  const today = new Date().toDateString();
+  // export check logs as csv file
+  async function handleExportCSV() {
+    try {
+      const res = await api.get('/checklogs/export', { responseType: 'blob' })
+      // create a temp link to trigger download
+      const url = URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'checklogs.csv'
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.log('csv export error:', err)
+      alert('Export failed')
+    }
+  }
+
+  // download pdf pass for an approved appointment
+  async function handleDownloadPDF(apt) {
+    try {
+      // first find the pass id for this appointment
+      const passRes = await api.get(`/passes/appointment/${apt._id}`)
+      const passId = passRes.data._id
+      // then download the pdf
+      const res = await api.get(`/passes/${passId}/pdf`, { responseType: 'blob' })
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `pass-${apt.visitor?.name || 'visitor'}.pdf`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.log('pdf error:', err)
+      alert('No pass found for this appointment')
+    }
+  }
+
+  const todayStr = new Date().toDateString()
+
+  // stats calculations
   const stats = [
-    { label: 'Total Visitors',   value: visitors.length,                                                       icon: <Users size={20} />,      color: 'indigo' },
-    { label: 'Active Passes',    value: appointments.filter(a => a.status === 'Approved').length,              icon: <UserCheck size={20} />,  color: 'emerald' },
-    { label: "Today's Meetings", value: appointments.filter(a => new Date(a.expectedDate).toDateString()===today).length, icon: <Calendar size={20} />, color: 'cyan' },
-    { label: 'Pending Review',   value: appointments.filter(a => a.status === 'Pending').length,               icon: <AlertCircle size={20} />,color: 'violet' },
-  ];
+    {
+      label: 'Total Visitors',
+      value: visitors.length,
+      icon: <Users size={20} />,
+      color: 'indigo',
+    },
+    {
+      label: 'Active Passes',
+      value: appointments.filter(a => a.status === 'Approved').length,
+      icon: <UserCheck size={20} />,
+      color: 'emerald',
+    },
+    {
+      label: "Today's Visits",
+      value: appointments.filter(a => new Date(a.expectedDate).toDateString() === todayStr).length,
+      icon: <Calendar size={20} />,
+      color: 'cyan',
+    },
+    {
+      label: 'Pending Approval',
+      value: appointments.filter(a => a.status === 'Pending').length,
+      icon: <AlertCircle size={20} />,
+      color: 'violet',
+    },
+  ]
 
-  const filteredVisitors = visitors.filter(v =>
-    [v.name, v.email, v.company || ''].join(' ').toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredVisitors = visitors.filter(v => {
+    const q = searchText.toLowerCase()
+    return v.name.toLowerCase().includes(q)
+      || v.email.toLowerCase().includes(q)
+      || (v.company || '').toLowerCase().includes(q)
+  })
 
-  if (loading) return (
-    <div style={{ minHeight: '60vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-      <div className="spinner" />
-      <p style={{ color: 'var(--text-muted)' }}>Loading dashboard…</p>
-    </div>
-  );
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: '1rem' }}>
+        <div className="spinner" />
+        <p style={{ color: '#64748b' }}>Loading...</p>
+      </div>
+    )
+  }
 
   return (
-    <div className="animate-fade-up container" style={{ paddingTop: '2rem', paddingBottom: '3rem' }}>
-      {/* ── Page header ── */}
+    <div className="container animate-fade-up" style={{ paddingTop: '2rem', paddingBottom: '3rem' }}>
+
+      {/* page header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '2rem', marginBottom: '0.3rem' }}>
-            Good {greeting()},{' '}
-            <span className="gradient-text">{user.name.split(' ')[0]}</span> 👋
+          <h1 style={{ fontSize: '1.9rem', fontWeight: 800, marginBottom: '0.25rem' }}>
+            {getGreeting()}, <span className="gradient-text">{user.name.split(' ')[0]}</span> 👋
           </h1>
-          <p style={{ color: 'var(--text-muted)' }}>
-            Here's what's happening at your facility today.
-          </p>
+          <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Here's your facility overview</p>
         </div>
+
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {/* only show export to admin/security */}
           {(user.role === 'Admin' || user.role === 'Security') && (
-            <button
-              className="btn btn-ghost"
-              style={{ gap: '0.4rem', fontSize: '0.85rem' }}
-              onClick={exportCSV}
-              title="Export check logs as CSV"
-            >
+            <button className="btn btn-ghost" onClick={handleExportCSV} title="Download check logs as CSV">
               <Download size={15} /> Export CSV
             </button>
           )}
-          <button
-            className="btn btn-ghost"
-            style={{ gap: '0.4rem', fontSize: '0.85rem' }}
-            onClick={() => load(true)}
-            disabled={refreshing}
-          >
-            <RefreshCw size={15} style={{ animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }} />
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+          <button className="btn btn-ghost" onClick={() => fetchAll(true)} disabled={refreshing}>
+            <RefreshCw size={15} style={{ animation: refreshing ? 'spin 0.7s linear infinite' : 'none' }} />
+            {refreshing ? 'Loading...' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {/* ── Stat cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem', marginBottom: '2.5rem' }}
-           className="stagger">
+      {/* stat cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px,1fr))', gap: '1.2rem', marginBottom: '2rem' }}
+        className="stagger">
         {stats.map((s, i) => (
           <div key={i} className={`stat-card ${s.color} animate-fade-up`}>
             <div className="stat-icon">{s.icon}</div>
-            <p style={{ fontSize: '2.25rem', fontWeight: '800', letterSpacing: '-0.03em', lineHeight: 1, marginBottom: '0.3rem' }}>
+            <p style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1, marginBottom: '0.3rem' }}>
               {s.value}
             </p>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>{s.label}</p>
+            <p style={{ color: '#64748b', fontSize: '0.85rem' }}>{s.label}</p>
           </div>
         ))}
       </div>
 
-      {/* ── Tabs ── */}
-      <div style={{
-        display: 'flex', gap: '0.25rem', padding: '0.3rem',
-        background: 'rgba(15,23,42,0.6)', borderRadius: '12px',
-        border: '1px solid var(--border)', marginBottom: '1.5rem',
-        width: 'fit-content'
-      }}>
-        {['overview', 'appointments', 'visitors'].map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              padding: '0.55rem 1.25rem', borderRadius: '9px', border: 'none',
-              background: tab === t ? 'linear-gradient(135deg, var(--primary), var(--primary-dark))' : 'transparent',
-              color: tab === t ? 'white' : 'var(--text-muted)',
-              fontWeight: tab === t ? '600' : '400',
-              fontSize: '0.875rem', cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'inherit',
-              boxShadow: tab === t ? '0 4px 12px rgba(99,102,241,0.4)' : 'none',
-              textTransform: 'capitalize'
-            }}
-          >
-            {t}
+      {/* tab buttons */}
+      <div style={{ display: 'flex', gap: '0.2rem', background: 'rgba(15,23,42,0.7)', padding: '0.3rem', borderRadius: '10px', width: 'fit-content', border: '1px solid rgba(99,102,241,0.12)', marginBottom: '1.5rem' }}>
+        {['overview', 'appointments', 'visitors'].map(tab => (
+          <button key={tab} onClick={() => setActiveTab(tab)} style={{
+            padding: '0.5rem 1.2rem', borderRadius: '7px', border: 'none', fontFamily: 'inherit',
+            fontSize: '0.85rem', cursor: 'pointer', textTransform: 'capitalize', transition: 'all 0.2s',
+            background: activeTab === tab ? 'linear-gradient(135deg,#6366f1,#4f46e5)' : 'transparent',
+            color: activeTab === tab ? 'white' : '#64748b',
+            fontWeight: activeTab === tab ? 600 : 400,
+            boxShadow: activeTab === tab ? '0 4px 10px rgba(99,102,241,0.35)' : 'none',
+          }}>
+            {tab}
           </button>
         ))}
       </div>
 
-      {/* ── Content ── */}
-      <div className="glass-panel glow-card animate-fade-in">
-        {/* OVERVIEW */}
-        {tab === 'overview' && (
-          <>
-            <SectionHeader title="Recent Appointments" subtitle="Latest 6 across the facility" />
+      {/* tab content */}
+      <div className="glass-panel">
+
+        {/* OVERVIEW TAB */}
+        {activeTab === 'overview' && (
+          <div>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <h3 style={{ fontSize: '1.1rem' }}>Recent Appointments</h3>
+              <p style={{ color: '#475569', fontSize: '0.78rem' }}>latest 6</p>
+            </div>
             {appointments.length === 0
-              ? <Empty text="No appointments yet" />
-              : appointments.slice(0, 6).map(a => (
-                <AppointmentRow key={a._id} a={a} user={user} onApprove={approve} onReject={reject} />
+              ? <EmptyState text="No appointments yet" />
+              : appointments.slice(0, 6).map(apt => (
+                <AppointmentRow
+                  key={apt._id}
+                  apt={apt}
+                  user={user}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
+                  onPDF={handleDownloadPDF}
+                />
               ))
             }
             {appointments.length > 6 && (
-              <button className="btn btn-ghost" style={{ marginTop: '0.5rem', fontSize: '0.85rem', width: '100%', justifyContent: 'center' }}
-                onClick={() => setTab('appointments')}>
-                View all {appointments.length} appointments <ChevronRight size={15} />
+              <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', fontSize: '0.82rem' }}
+                onClick={() => setActiveTab('appointments')}>
+                View all {appointments.length} <ChevronRight size={14} />
               </button>
             )}
-          </>
+          </div>
         )}
 
-        {/* APPOINTMENTS */}
-        {tab === 'appointments' && (
-          <>
-            <SectionHeader title="All Appointments" subtitle={`${appointments.length} total`} />
+        {/* APPOINTMENTS TAB */}
+        {activeTab === 'appointments' && (
+          <div>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <h3 style={{ fontSize: '1.1rem' }}>All Appointments</h3>
+              <p style={{ color: '#475569', fontSize: '0.78rem' }}>{appointments.length} total</p>
+            </div>
             {appointments.length === 0
-              ? <Empty text="No appointments found" />
-              : appointments.map(a => (
-                <AppointmentRow key={a._id} a={a} user={user} onApprove={approve} onReject={reject} onPDF={downloadPDF} />
+              ? <EmptyState text="No appointments" />
+              : appointments.map(apt => (
+                <AppointmentRow
+                  key={apt._id}
+                  apt={apt}
+                  user={user}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
+                  onPDF={handleDownloadPDF}
+                />
               ))
             }
-          </>
+          </div>
         )}
 
-        {/* VISITORS */}
-        {tab === 'visitors' && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-              <SectionHeader title="Visitor Registry" subtitle={`${visitors.length} registered`} noMargin />
-              <div style={{ position: 'relative' }}>
-                <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', pointerEvents: 'none' }} />
+        {/* VISITORS TAB */}
+        {activeTab === 'visitors' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem' }}>Visitor Registry</h3>
+                <p style={{ color: '#475569', fontSize: '0.78rem' }}>{visitors.length} registered</p>
+              </div>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <Search size={14} style={{ position: 'absolute', left: '0.7rem', color: '#475569', pointerEvents: 'none' }} />
                 <input
                   className="form-input"
-                  style={{ paddingLeft: '2.25rem', width: '260px' }}
-                  placeholder="Search name, email, company…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
+                  style={{ paddingLeft: '2.1rem', width: 240 }}
+                  placeholder="Search name, email, company..."
+                  value={searchText}
+                  onChange={e => setSearchText(e.target.value)}
                 />
               </div>
             </div>
@@ -226,134 +318,105 @@ export default function Dashboard() {
                     <th>Email</th>
                     <th>Phone</th>
                     <th>Company</th>
-                    <th>Registered</th>
+                    <th>Added</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredVisitors.length === 0
-                    ? <tr><td colSpan={5}><Empty text="No visitors match your search" /></td></tr>
+                    ? <tr><td colSpan={5}><EmptyState text="No visitors match" /></td></tr>
                     : filteredVisitors.map(v => (
                       <tr key={v._id}>
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                             <Avatar name={v.name} />
-                            <span style={{ fontWeight: '500' }}>{v.name}</span>
+                            <span style={{ fontWeight: 500 }}>{v.name}</span>
                           </div>
                         </td>
-                        <td style={{ color: 'var(--text-muted)' }}>{v.email}</td>
-                        <td style={{ color: 'var(--text-muted)' }}>{v.phone}</td>
-                        <td>
-                          {v.company
-                            ? <span className="chip">{v.company}</span>
-                            : <span style={{ color: 'var(--text-dim)' }}>—</span>
-                          }
-                        </td>
-                        <td style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>
-                          {new Date(v.createdAt).toLocaleDateString()}
-                        </td>
+                        <td style={{ color: '#64748b' }}>{v.email}</td>
+                        <td style={{ color: '#64748b' }}>{v.phone}</td>
+                        <td>{v.company ? <span className="chip">{v.company}</span> : <span style={{ color: '#334155' }}>—</span>}</td>
+                        <td style={{ color: '#334155', fontSize: '0.78rem' }}>{new Date(v.createdAt).toLocaleDateString()}</td>
                       </tr>
                     ))
                   }
                 </tbody>
               </table>
             </div>
-          </>
+          </div>
         )}
+
       </div>
     </div>
-  );
+  )
 }
 
-/* ── Sub-components ── */
+// single appointment row component
+function AppointmentRow({ apt, user, onApprove, onReject, onPDF }) {
+  const meta = STATUS[apt.status] || STATUS.Pending
+  const canApproveReject = apt.status === 'Pending' && (user.role === 'Admin' || user.role === 'Employee')
 
-function AppointmentRow({ a, user, onApprove, onReject, onPDF }) {
-  const meta = statusMeta[a.status] || statusMeta.Pending;
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: '1rem',
-      padding: '1rem 0', borderBottom: '1px solid rgba(30,41,59,0.8)',
-      flexWrap: 'wrap'
+      display: 'flex', alignItems: 'center', gap: '0.9rem',
+      padding: '0.9rem 0', borderBottom: '1px solid rgba(30,41,59,0.9)',
+      flexWrap: 'wrap',
     }}>
-      <Avatar name={a.visitor?.name || '?'} />
-      <div style={{ flex: 1, minWidth: '160px' }}>
-        <p style={{ fontWeight: '600', marginBottom: '0.15rem' }}>{a.visitor?.name || 'Unknown'}</p>
-        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          Host: {a.host?.name || '—'} · {fmtDate(a.expectedDate)}
+      <Avatar name={apt.visitor?.name || '?'} />
+
+      <div style={{ flex: 1, minWidth: 150 }}>
+        <p style={{ fontWeight: 600, marginBottom: '0.1rem', fontSize: '0.9rem' }}>
+          {apt.visitor?.name || 'Unknown'}
+        </p>
+        <p style={{ fontSize: '0.76rem', color: '#475569' }}>
+          Host: {apt.host?.name || '—'} &nbsp;·&nbsp; {formatDate(apt.expectedDate)}
         </p>
       </div>
-      <div style={{ flex: 1, minWidth: '140px' }}>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {a.purpose}
-        </p>
-      </div>
-      <span className={`badge ${meta.cls}`} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-        {meta.icon}{a.status}
+
+      <p style={{ flex: 1, minWidth: 120, fontSize: '0.82rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {apt.purpose}
+      </p>
+
+      <span className={`badge ${meta.badge}`}>
+        {meta.icon} {apt.status}
       </span>
-      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-        {a.status === 'Pending' && (user.role === 'Admin' || user.role === 'Employee') && (
+
+      <div style={{ display: 'flex', gap: '0.35rem' }}>
+        {canApproveReject && (
           <>
-            <button className="btn btn-success" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }} onClick={() => onApprove(a._id)}>
+            <button className="btn btn-success" style={{ padding: '0.3rem 0.8rem', fontSize: '0.78rem' }}
+              onClick={() => onApprove(apt._id)}>
               Approve
             </button>
-            <button className="btn btn-danger" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }} onClick={() => onReject(a._id)}>
+            <button className="btn btn-danger" style={{ padding: '0.3rem 0.8rem', fontSize: '0.78rem' }}
+              onClick={() => onReject(apt._id)}>
               Reject
             </button>
           </>
         )}
-        {a.status === 'Approved' && (
-          <button
-            className="btn btn-ghost"
-            style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem', gap: '0.3rem', border: '1px solid var(--border)' }}
-            onClick={() => onPDF && onPDF(a)}
-            title="Download PDF Pass"
-          >
+        {apt.status === 'Approved' && (
+          <button className="btn btn-ghost" style={{ padding: '0.3rem 0.7rem', fontSize: '0.78rem', border: '1px solid rgba(99,102,241,0.2)' }}
+            onClick={() => onPDF(apt)}
+            title="Download PDF pass">
             <FileText size={13} /> PDF
           </button>
         )}
       </div>
     </div>
-  );
+  )
 }
 
-function SectionHeader({ title, subtitle, noMargin }) {
+function EmptyState({ text }) {
   return (
-    <div style={{ marginBottom: noMargin ? 0 : '1.5rem' }}>
-      <h3 style={{ fontSize: '1.15rem', marginBottom: '0.2rem' }}>{title}</h3>
-      {subtitle && <p style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{subtitle}</p>}
+    <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#334155' }}>
+      <p style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>📭</p>
+      <p style={{ fontSize: '0.875rem' }}>{text}</p>
     </div>
-  );
+  )
 }
 
-function Avatar({ name }) {
-  const initials = name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-  const hue = [...name].reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
-  return (
-    <div style={{
-      width: '38px', height: '38px', borderRadius: '10px',
-      background: `hsl(${hue}, 60%, 30%)`,
-      border: `1px solid hsl(${hue}, 60%, 45%)`,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: '0.75rem', fontWeight: '700',
-      color: `hsl(${hue}, 80%, 85%)`,
-      flexShrink: 0
-    }}>
-      {initials}
-    </div>
-  );
-}
-
-function Empty({ text }) {
-  return (
-    <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-dim)' }}>
-      <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🌐</p>
-      <p>{text}</p>
-    </div>
-  );
-}
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'morning';
-  if (h < 17) return 'afternoon';
-  return 'evening';
+function getGreeting() {
+  const h = new Date().getHours()
+  if (h < 12) return 'Good morning'
+  if (h < 17) return 'Good afternoon'
+  return 'Good evening'
 }
