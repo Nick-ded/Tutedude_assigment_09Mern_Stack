@@ -23,9 +23,9 @@ const Login = () => {
 
   const quickFill = (role) => {
     const creds = {
-      admin:    { email: 'admin@example.com',    password: 'password' },
-      security: { email: 'security@example.com', password: 'password' },
-      employee: { email: 'john@example.com',     password: 'password' },
+      admin:    { email: 'admin@example.com',    password: 'password123' },
+      security: { email: 'security@example.com', password: 'password123' },
+      employee: { email: 'john@example.com',     password: 'password123' },
     };
     setEmail(creds[role].email);
     setPassword(creds[role].password);
