@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { CheckCircle2, XCircle, Clock, User, RefreshCw, Wifi, WifiOff, ScanLine } from 'lucide-react';
-import axios from 'axios';
+import api from '../api';
+const axios = api;
 
 export default function SecurityScan() {
   const [result, setResult]         = useState(null);

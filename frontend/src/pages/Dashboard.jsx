@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import axios from 'axios';
+import api from '../api';
+const axios = api;
 import {
   Users, UserCheck, Calendar, QrCode, Search,
   TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle,

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { User, Mail, Phone, Building, Calendar, Clock, CheckCircle2, ArrowRight, ArrowLeft, Upload } from 'lucide-react';
-import axios from 'axios';
+import api from '../api';
+const axios = api;
 
 const STEPS = ['Your Details', 'Appointment', 'Confirm'];
 
